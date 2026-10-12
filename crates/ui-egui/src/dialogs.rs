@@ -97,6 +97,10 @@ pub enum Kind {
     OffsetPlane {
         offset: String,
     },
+    /// Two planes or planar faces, with unchanged references retained when editing.
+    Midplane {
+        original: Vec<(Vec<Sel>, Value)>,
+    },
     /// A construction plane through an axis at an angle to a plane.
     AnglePlane {
         angle: String,
@@ -423,6 +427,10 @@ impl Dialog {
             "construct.plane.along_path" => {
                 Dialog::new(Kind::PathPlane { t: "0.5".into(), sketch: None }, vec![SelInput::new("Path", CURVES | EDGES, false)])
             }
+            "construct.plane.midplane" => Dialog::new(
+                Kind::Midplane { original: Vec::new() },
+                vec![SelInput::new("First plane", PLANES | PLANAR_FACES, false), SelInput::new("Second plane", PLANES | PLANAR_FACES, false)],
+            ),
             "construct.plane.at_angle" => Dialog::new(
                 Kind::AnglePlane { angle: "45 deg".into() },
                 vec![SelInput::new("Plane", PLANES, false), SelInput::new("Axis", AXES, false)],
@@ -622,6 +630,7 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
+                | Kind::Midplane { .. }
                 | Kind::Split
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
@@ -881,6 +890,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::OffsetPlane { .. } => "OFFSET PLANE",
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
+        Kind::Midplane { .. } => "MIDPLANE",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
         Kind::Emboss { .. } => "EMBOSS",
@@ -1764,7 +1774,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         enter |= field(ui, t);
                         ui.end_row();
                     }
-                    Kind::Split | Kind::ReplaceFace | Kind::Remove => {}
+                    Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane { .. } => {}
                     Kind::Rib { thickness, depth, flip, .. } => {
                         row_label(ui, "Thickness");
                         enter |= field(ui, thickness);
@@ -2753,6 +2763,21 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
+        Kind::Midplane { original } => {
+            let reference = |i: usize| -> Result<Value, String> {
+                if let Some((items, value)) = original.get(i)
+                    && items == sels(d, i)
+                {
+                    return Ok(value.clone());
+                }
+                match sels(d, i).first() {
+                    Some(Sel::Plane { name }) => Ok(json!(name)),
+                    Some(Sel::Face { body, index, point }) if planar_face(&app.session, body, *index).is_some() => Ok(json!({"face": pt(*point)})),
+                    _ => Err(format!("pick {} plane or planar face", if i == 0 { "the first" } else { "the second" })),
+                }
+            };
+            ("construct.plane.midplane", json!({"a": reference(0)?, "b": reference(1)?}))
+        }
         Kind::OffsetPlane { offset } => {
             need(0, "a plane")?;
             let base = match sels(d, 0).first() {
@@ -3306,6 +3331,25 @@ pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
     }
 }
 
+/// Refill an associative face pick at its current position, after upstream edits.
+fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>) -> Option<Sel> {
+    if let Some(name) = name {
+        for body in &s.world_state().bodies {
+            if let Some(index) = solvecraft_engine::doc::naming::face_names(body).iter().position(|n| n == name) {
+                let mesh = body.mesh();
+                for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+                    if *face as usize == index
+                        && let Some([a, b, c]) = mesh.tri(triangle)
+                    {
+                        return Some(Sel::Face { body: body.name.clone(), index, point: (a + b + c) / 3.0 });
+                    }
+                }
+            }
+        }
+    }
+    face_sel(s, at)
+}
+
 pub(crate) fn op_index(o: &Operation) -> usize {
     match o {
         Operation::NewBody => 0,
@@ -3742,6 +3786,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
             }
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
+            use solvecraft_engine::doc::construct::GeoRef;
+            let mut d = start("construct.plane.midplane")?;
+            let mut original = Vec::new();
+            for (input, reference) in d.inputs.iter_mut().zip([a.as_ref(), b.as_ref()]) {
+                input.items = match reference {
+                    GeoRef::Plane { plane } => plane_sel(s, plane).into_iter().collect(),
+                    GeoRef::Face { at, name } => construction_face_sel(s, *at, name.as_deref()).into_iter().collect(),
+                    _ => Vec::new(),
+                };
+                original.push((input.items.clone(), serde_json::to_value(reference).ok()?));
+            }
+            d.kind = Kind::Midplane { original };
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, distance } } => {
