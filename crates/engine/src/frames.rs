@@ -315,7 +315,8 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
+            // Midplane captures placed face references itself, in the author's frame.
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| i == "construct.plane.midplane" || !table(i).is_empty())));
         }
         (Nested, outer)
     }

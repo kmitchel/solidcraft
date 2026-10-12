@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.plane.midplane", "Midplane", plane_mid)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
-        .params("a, b: plane or planar face refs (halfway between; bisecting when they meet at an angle); name?"),
+        .params("a, b: plane or planar face refs (halfway between; bisecting when they meet at an angle); face picks: {face: [world x,y,z], body?, index?, path?}; name?"),
     CommandSpec::new("construct.plane.two_edges", "Plane Through Two Edges", plane_edges)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
@@ -219,7 +219,41 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.midplane";
-    let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
+    let reference = |key| -> Result<GeoRef> {
+        let value = p.get(key);
+        if let Some(value) = value.filter(|value| {
+            value.get("face").is_some() || (value.get("type").and_then(Value::as_str) == Some("face") && value.get("name").is_none_or(Value::is_null))
+        }) && crate::frames::placed(s)
+        {
+            // A local pick alone loses which occurrence was selected. Keep its exact
+            // source and placement, as sketch face attachments do, including across components.
+            let mut pick = value.clone();
+            if let Some(at) = value.get("at") {
+                pick["face"] = at.clone();
+            }
+            return Ok(GeoRef::Plane { plane: super::sketch::face::capture(s, &pick, cmd)? });
+        }
+        let mut reference = geo(s, value, cmd, key)?;
+        // Tagged references are saved definitions, already in the author's frame.
+        if value.is_some_and(|value| value.get("type").is_none())
+            && let Some(inverse) = solvecraft_doc::mat_inverse(&s.active_component_frame())
+        {
+            reference.map_points(&mut |point| *point = solvecraft_doc::apply_point(&inverse, *point), &mut |plane| {
+                let mut kind = FeatureKind::ConstructionPlane { plane: plane.clone() };
+                kind.transform_geometry(&inverse);
+                if let FeatureKind::ConstructionPlane { plane: mapped } = kind {
+                    *plane = mapped;
+                }
+            });
+        }
+        Ok(reference)
+    };
+    let (a, b) = (reference("a")?, reference("b")?);
+    for reference in [&a, &b] {
+        if let GeoRef::Plane { plane: plane @ PlaneRef::Face { anchor: Some(_), .. } } = reference {
+            super::sketch::face::capture_positions(s, plane)?;
+        }
+    }
     plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b) })
 }
 

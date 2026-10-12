@@ -107,7 +107,13 @@ impl Document {
             match plane {
                 PlaneRef::Face { anchor: Some(anchor), .. } => *plane = PlaneRef::Custom { plane: doc.resolve_face_anchor(anchor, author, state)? },
                 PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } => replace(doc, base, author, state, depth + 1)?,
-                _ => {}
+                _ => {
+                    for reference in plane.refs_mut() {
+                        if let crate::construct::GeoRef::Plane { plane } = reference {
+                            replace(doc, plane, author, state, depth + 1)?;
+                        }
+                    }
+                }
             }
             Ok(())
         }

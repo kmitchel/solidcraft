@@ -173,6 +173,65 @@ fn midplane_between_parallel_and_meeting_faces() {
 }
 
 #[test]
+fn midplane_keeps_distinct_component_placements_and_recomputes_after_moves() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Lower"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Lower:1","translate":[100,0,80],"capture":false}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "component.create", json!({"name":"Upper"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Upper:1","translate":[100,0,180],"capture":false}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "construct.plane.midplane", json!({"a":{"face":[120,15,100]},"b":{"face":[120,15,180]},"name":"Mid"}));
+    assert!(s.pending_moves.is_empty(), "the selected source positions must be captured with the feature");
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(120.0, 15.0, 140.0)));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Lower:1","translate":[0,0,20]}));
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(120.0, 15.0, 150.0)), "placement changes must invalidate the construction cache");
+    let saved = serde_json::to_string(&s.doc).unwrap();
+    let mut restored = Session { doc: std::sync::Arc::new(serde_json::from_str(&saved).unwrap()), ..Session::default() };
+    restored.refresh();
+    assert!(on_plane(&plane(&restored, "Mid"), Vec3::new(120.0, 15.0, 150.0)));
+}
+
+#[test]
+fn midplane_face_picks_follow_rotated_occurrences() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","axis":[0,1,0],"angle":"90 deg","translate":[100,0,80]}));
+    let component = s.active_component;
+    let frame = s.doc.component_transform(component);
+    let bottom = solvecraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 0.0));
+    let top = solvecraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 20.0));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "construct.plane.midplane", json!({"a":{"face":[bottom.x,bottom.y,bottom.z]},"b":{"face":[top.x,top.y,top.z]},"name":"Mid"}));
+    let mid = plane(&s, "Mid");
+    assert!(parallel(mid.normal(), Vec3::X));
+    assert!(on_plane(&mid, (bottom + top) / 2.0));
+}
+
+#[test]
+fn midplane_distinguishes_instances_of_the_same_face() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "occurrence.copy", json!({"component":"Part","translate":[0,0,80]}));
+    let world = s.world_state();
+    let copy = world.bodies.iter().find(|body| body.mesh().bounds().min.z > 70.0).unwrap();
+    run(
+        &mut s,
+        "construct.plane.midplane",
+        json!({
+            "a":{"face":[20,15,20],"body":"Body1","index":5},
+            "b":{"type":"face","at":[20,15,100],"body":copy.name,"index":5},"name":"Mid"
+        }),
+    );
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(20.0, 15.0, 60.0)));
+}
+
+#[test]
 fn plane_through_two_edges() {
     let mut s = part();
     run(&mut s, "construct.plane.two_edges", json!({"a": {"edge": [20, 0, 0]}, "b": {"edge": [20, 30, 20]}, "name": "E"}));

@@ -766,12 +766,17 @@ fn placement_digest(doc: &Document, f: &Feature) -> u64 {
         }
         return hash.finish();
     }
-    let FeatureKind::Sketch { plane, sketch } = &f.kind else { return 0 };
-    let anchor = crate::face_anchor::plane_face_anchor(plane);
-    if (doc.occurrences.is_empty() && (anchor.is_none() || doc.body_offsets.is_empty()))
-        || (!matches!(plane, PlaneRef::Face { .. }) && anchor.is_none() && sketch.links.is_empty())
-    {
-        return 0;
+    match &f.kind {
+        FeatureKind::ConstructionPlane { plane } if plane.needs_model() => {}
+        FeatureKind::Sketch { plane, sketch } => {
+            let anchor = crate::face_anchor::plane_face_anchor(plane);
+            if (doc.occurrences.is_empty() && (anchor.is_none() || doc.body_offsets.is_empty()))
+                || (!matches!(plane, PlaneRef::Face { .. }) && anchor.is_none() && sketch.links.is_empty())
+            {
+                return 0;
+            }
+        }
+        _ => return 0,
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for o in &doc.occurrences {
@@ -3592,15 +3597,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::ConstructionPlane { plane } => {
-            // On a body face: follow the face as it is now, as a sketch on that face does.
-            let pl = match crate::face_anchor::plane_face_anchor(plane) {
-                Some(anchor) => {
-                    let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
-                    doc.resolve_attached_plane(vals, plane, f.component, st, &fst)?
-                }
-                // Picks on bodies of other (moved) components are where those bodies are shown.
-                None => doc.resolve_plane_in(vals, plane, 0, Some(&construction_state(doc, st, f.component)))?,
-            };
+            let pl = doc.resolve_attached_plane(vals, plane, f.component, st, &construction_state(doc, st, f.component))?;
             st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Plane(pl) });
             Ok(())
         }
@@ -4217,6 +4214,23 @@ pub fn world_state(doc: &Document, st: &ModelState) -> ModelState {
             out.bodies.push(placed);
         }
         if primary {
+            for construction in st.construct.iter().filter(|construction| comp_of_feature(construction.feature) == comp) {
+                use crate::construct::ConstructGeom;
+                let mut placed = construction.clone();
+                if !ident {
+                    placed.geom = match &construction.geom {
+                        ConstructGeom::Plane(plane) => ConstructGeom::Plane(
+                            Plane::new(crate::apply_point(&m, plane.origin), crate::apply_vector(&m, plane.x), crate::apply_vector(&m, plane.y))
+                                .unwrap_or(*plane),
+                        ),
+                        ConstructGeom::Axis { origin, dir } => {
+                            ConstructGeom::Axis { origin: crate::apply_point(&m, *origin), dir: crate::apply_vector(&m, *dir) }
+                        }
+                        ConstructGeom::Point(point) => ConstructGeom::Point(crate::apply_point(&m, *point)),
+                    };
+                }
+                out.construct.push(placed);
+            }
             for s in st.sketches.iter().filter(|s| comp_of_feature(s.feature) == comp) {
                 if ident {
                     // In place: shared as it is.
