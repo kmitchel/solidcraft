@@ -252,6 +252,53 @@ fn midplane_captures_unmoved_component_faces_before_later_placement_changes() {
 }
 
 #[test]
+fn midplane_edit_restores_root_and_copied_author_occurrences() {
+    use solvecraft_doc::{FeatureKind, PlaneRef, construct::GeoRef};
+    for root_author in [true, false] {
+        for replace_both in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "component.create", json!({"name":"Other"}));
+            run(&mut s, "component.activate", json!({"component":"root"}));
+            run(&mut s, "component.create", json!({"name":"Part"}));
+            run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+            run(&mut s, "component.activate", json!({"component":"root"}));
+            let copy = run(&mut s, "occurrence.copy", json!({"component":"Part","translate":[0,0,80]}));
+            let copy_id = copy["occurrence"].as_u64().unwrap();
+            if !root_author {
+                run(&mut s, "component.activate", json!({"component":"Part","occurrence":copy_id}));
+            }
+            run(&mut s, "construct.plane.midplane", json!({"a":{"face":[20,15,80]},"b":{"face":[20,15,100]},"name":"Mid"}));
+            let feature = s.doc.find_feature("Mid").unwrap().clone();
+            let FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { b, .. } } = &feature.kind else { panic!("not a midplane") };
+            let second = if replace_both { json!({"face":[20,15,100]}) } else { serde_json::to_value(b).unwrap() };
+            // An unrelated active occurrence must neither become the root author's
+            // path nor replace the copied occurrence saved by a component feature.
+            run(&mut s, "component.activate", json!({"component":"Other","occurrence":"Other:1"}));
+            let context = (s.active_component, s.active_occurrence_path.clone());
+            run(
+                &mut s,
+                "timeline.redefine",
+                json!({"feature":"Mid","command":"construct.plane.midplane","params":{"a":{"face":[20,15,100]},"b":second}}),
+            );
+            assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+            let edited = s.doc.find_feature("Mid").unwrap();
+            assert_eq!((edited.id, edited.component, &edited.name), (feature.id, feature.component, &feature.name));
+            let FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } = &edited.kind else { panic!("not a midplane") };
+            for reference in [a, b] {
+                let GeoRef::Plane { plane: PlaneRef::Face { anchor: Some(anchor), .. } } = reference.as_ref() else { panic!("no face anchor") };
+                assert_eq!(anchor.author_path, if root_author { vec![] } else { vec![copy_id] });
+            }
+            let expected_z = if root_author { 100.0 } else { 20.0 };
+            assert!(on_plane(&plane(&s, "Mid"), Vec3::new(20.0, 15.0, expected_z)));
+            let saved = serde_json::to_string(&s.doc).unwrap();
+            let mut restored = Session { doc: std::sync::Arc::new(serde_json::from_str(&saved).unwrap()), ..Session::default() };
+            restored.refresh();
+            assert!(on_plane(&plane(&restored, "Mid"), Vec3::new(20.0, 15.0, expected_z)));
+        }
+    }
+}
+
+#[test]
 fn plane_through_two_edges() {
     let mut s = part();
     run(&mut s, "construct.plane.two_edges", json!({"a": {"edge": [20, 0, 0]}, "b": {"edge": [20, 30, 20]}, "name": "E"}));
