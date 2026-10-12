@@ -223,10 +223,9 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
         let value = p.get(key);
         if let Some(value) = value.filter(|value| {
             value.get("face").is_some() || (value.get("type").and_then(Value::as_str) == Some("face") && value.get("name").is_none_or(Value::is_null))
-        }) && crate::frames::placed(s)
-        {
+        }) {
             // A local pick alone loses which occurrence was selected. Keep its exact
-            // source and placement, as sketch face attachments do, including across components.
+            // source and placement even before its first move, as sketch attachments do.
             let mut pick = value.clone();
             if let Some(at) = value.get("at") {
                 pick["face"] = at.clone();
