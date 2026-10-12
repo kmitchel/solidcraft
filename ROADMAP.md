@@ -66,8 +66,10 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   and timeline editing use the existing associative command; unchanged edits preserve
   persistent face references and source-plane dependencies.
 - Midplane face picks retain the selected component occurrence and resolve in the feature's
-  authoring frame, including when the component is unmoved at creation. Live preview depth
-  bounds include plane corners, including distant planes and designs without bodies.
+  authoring frame, including when the component is unmoved at creation. Editing restores the
+  saved author occurrence before capturing replacement faces, including copied occurrences.
+  Live preview depth bounds include plane corners, including distant planes and designs
+  without bodies.
 
 ## Dimensioning and error reporting
 

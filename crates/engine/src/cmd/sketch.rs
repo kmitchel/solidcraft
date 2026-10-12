@@ -545,6 +545,17 @@ pub(crate) fn author_path_for_rebind(s: &Session, feature: &solidcraft_doc::Feat
                 _ => break,
             }
         }
+    } else if let FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } = &feature.kind {
+        for reference in [a, b] {
+            if let solvecraft_doc::construct::GeoRef::Plane { plane } = reference.as_ref()
+                && let Some(anchor) = face::anchor(plane)
+            {
+                if saved.as_ref().is_some_and(|path| *path != anchor.author_path) {
+                    return Err(bad(cmd, "midplane references have conflicting author occurrence paths"));
+                }
+                saved = Some(anchor.author_path.clone());
+            }
+        }
     }
     let path = if let Some(value) = p.get("author_path") {
         value
@@ -562,12 +573,12 @@ pub(crate) fn author_path_for_rebind(s: &Session, feature: &solidcraft_doc::Feat
         let placements = super::component::properties::placements(&s.placed_document(), cmd)?;
         let paths: Vec<_> = placements.into_iter().filter(|(component, _, _)| *component == feature.component).map(|(_, path, _)| path).collect();
         if paths.len() != 1 {
-            return Err(bad(cmd, "sketch author placement is ambiguous; provide exact author_path or activate the intended occurrence"));
+            return Err(bad(cmd, "feature author placement is ambiguous; provide exact author_path or activate the intended occurrence"));
         }
-        paths.into_iter().next().ok_or_else(|| bad(cmd, "sketch author placement is missing"))?
+        paths.into_iter().next().ok_or_else(|| bad(cmd, "feature author placement is missing"))?
     };
     if feature.component != 0 && path.is_empty() {
-        return Err(bad(cmd, "a component sketch needs an explicit complete author_path"));
+        return Err(bad(cmd, "a component feature needs an explicit complete author_path"));
     }
     solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), feature.component, &path)?;
     Ok(path)

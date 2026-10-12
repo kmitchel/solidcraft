@@ -493,6 +493,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     trial.active_component = old.component;
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
+    } else if matches!(&old.kind, FeatureKind::ConstructionPlane { plane: solvecraft_doc::PlaneRef::Midplane { .. } }) {
+        let path = super::author_path_for_rebind(s, &old, p, cmd)?;
+        trial.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
     trial.active_sketch = None;
     trial.selection = s.selection.clone();

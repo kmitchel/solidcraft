@@ -147,6 +147,50 @@ fn midplane_on_moved_component_faces_previews_applies_and_edits() {
 }
 
 #[test]
+fn midplane_edit_in_copied_occurrence_previews_and_captures_replacement_faces() {
+    use solvecraft_engine::doc::{PlaneRef, construct::GeoRef};
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.run("component.activate", json!({"component":"root"})).unwrap();
+    let copy = h.app.run("occurrence.copy", json!({"component":"Part","translate":[0,0,80]})).unwrap();
+    let copy_id = copy["occurrence"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component":"Part","occurrence":copy_id})).unwrap();
+    h.app.run("construct.plane.midplane", json!({"a":{"face":[20,15,80]},"b":{"face":[20,15,100]},"name":"Mid"})).unwrap();
+    let original = h.app.session.doc.find_feature("Mid").unwrap().clone();
+    h.app.run("component.activate", json!({"component":"root"})).unwrap();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Mid"}})).unwrap();
+    let top = dialogs::face_sel(&h.app.session, Vec3::new(20.0, 15.0, 100.0)).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs.first_mut().unwrap().items = vec![top];
+    let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let preview = h.app.session.preview(&commands).unwrap();
+    let solvecraft_engine::doc::construct::ConstructGeom::Plane(plane) =
+        &preview.after.construct.iter().find(|item| item.name == "Mid").unwrap().geom
+    else {
+        panic!("not a plane")
+    };
+    assert!((plane.origin.z - 20.0).abs() < 1e-8, "{plane:?}");
+    assert_eq!(h.app.session.doc.feature(original.id).unwrap().kind, original.kind, "preview must not apply the edit");
+    h.frames(4);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } = &h.app.session.doc.feature(original.id).unwrap().kind else {
+        panic!("not a midplane")
+    };
+    for reference in [a, b] {
+        let GeoRef::Plane { plane: PlaneRef::Face { anchor: Some(anchor), .. } } = reference.as_ref() else { panic!("no anchor") };
+        assert_eq!(anchor.author_path, vec![copy_id]);
+    }
+    assert!((midplane(&h, "Mid").origin.z - 20.0).abs() < 1e-8);
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(h.app.session.active_occurrence_path.is_none());
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.feature(original.id).unwrap().kind, original.kind);
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert!((midplane(&h, "Mid").origin.z - 20.0).abs() < 1e-8);
+}
+
+#[test]
 fn distant_midplane_preview_bounds_cover_every_drawn_corner() {
     for with_body in [false, true] {
         let mut h = if with_body { part() } else { Harness::new() };
