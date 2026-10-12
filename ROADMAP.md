@@ -65,6 +65,9 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   dialog, including preselection and a visible live plane preview. Apply, cancel, undo/redo
   and timeline editing use the existing associative command; unchanged edits preserve
   persistent face references and source-plane dependencies.
+- Midplane face picks retain the selected component occurrence and resolve in the feature's
+  authoring frame. Live preview depth bounds include plane corners, including distant planes
+  and designs without bodies.
 
 ## Dimensioning and error reporting
 

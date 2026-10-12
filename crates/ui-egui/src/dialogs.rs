@@ -2733,7 +2733,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 match sels(d, i).first() {
                     Some(Sel::Plane { name }) => Ok(json!(name)),
-                    Some(Sel::Face { body, index, point }) if planar_face(&app.session, body, *index).is_some() => Ok(json!({"face": pt(*point)})),
+                    Some(Sel::Face { body, index, point }) if planar_face(&app.session, body, *index).is_some() => {
+                        Ok(json!({"face": pt(*point), "body": body, "index": index}))
+                    }
                     _ => Err(format!("pick {} plane or planar face", if i == 0 { "the first" } else { "the second" })),
                 }
             };
@@ -3294,8 +3296,12 @@ pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
 
 /// Refill an associative face pick at its current position, after upstream edits.
 fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>) -> Option<Sel> {
+    construction_face_sel_on(s, at, name, None)
+}
+
+fn construction_face_sel_on(s: &Session, at: Vec3, name: Option<&str>, picked_body: Option<&str>) -> Option<Sel> {
     if let Some(name) = name {
-        for body in &s.world_state().bodies {
+        for body in s.world_state().bodies.iter().filter(|body| picked_body.is_none_or(|picked| picked == body.name)) {
             if let Some(index) = solvecraft_engine::doc::naming::face_names(body).iter().position(|n| n == name) {
                 let mesh = body.mesh();
                 for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
@@ -3308,7 +3314,7 @@ fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>) -> Option<Se
             }
         }
     }
-    face_sel(s, at)
+    picked_body.is_none().then(|| face_sel(s, at)).flatten()
 }
 
 pub(crate) fn op_index(o: &Operation) -> usize {
@@ -3755,6 +3761,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut original = Vec::new();
             for (input, reference) in d.inputs.iter_mut().zip([a.as_ref(), b.as_ref()]) {
                 input.items = match reference {
+                    GeoRef::Plane { plane: PlaneRef::Face { at, name, anchor, .. } } => {
+                        let body = anchor
+                            .as_ref()
+                            .map(|anchor| s.doc.world_body_name(&s.model.state(), &anchor.target.body, anchor.component, &anchor.path));
+                        construction_face_sel_on(s, *at, name.as_deref(), body.as_deref()).into_iter().collect()
+                    }
                     GeoRef::Plane { plane } => plane_sel(s, plane).into_iter().collect(),
                     GeoRef::Face { at, name } => construction_face_sel(s, *at, name.as_deref()).into_iter().collect(),
                     _ => Vec::new(),

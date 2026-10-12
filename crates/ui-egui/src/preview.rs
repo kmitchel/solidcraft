@@ -206,7 +206,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut built = build(&preview.before, &preview.after, colors);
-            built.bounds = state_bounds(&preview.after);
+            built.bounds = built.bounds.union(&state_bounds(&preview.after));
             built
         }))
         .map_err(|_| "the preview failed".to_string());
@@ -231,7 +231,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         None => {
             let p = real.map_err(|e| e.to_string())?;
             let mut b = guard(&|| build(&p.before, &p.after, colors))?;
-            b.bounds = state_bounds(&p.after);
+            b.bounds = b.bounds.union(&state_bounds(&p.after));
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
             b.applied = p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64)).find_map(|id| p.after.fitted_range(id));
@@ -306,6 +306,8 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let mut sc = GpuScene::default();
     let mut replaced = Vec::new();
+    let body_bounds = state_bounds(after);
+    let mut bounds = body_bounds;
     // Construction features have no body mesh. Draw new or changed planes explicitly.
     for item in &after.construct {
         use solidcraft_engine::doc::construct::ConstructGeom;
@@ -313,9 +315,8 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         if let ConstructGeom::Plane(plane) = &item.geom {
-            let bounds = state_bounds(after);
-            let size = if bounds.is_empty() { 20.0 } else { bounds.size().len().max(20.0) * 0.6 };
-            let center = if bounds.is_empty() { plane.origin } else { bounds.center() };
+            let size = if body_bounds.is_empty() { 20.0 } else { body_bounds.size().len().max(20.0) * 0.6 };
+            let center = if body_bounds.is_empty() { plane.origin } else { body_bounds.center() };
             let center = center - plane.normal() * (center - plane.origin).dot(plane.normal());
             let q = [
                 center - plane.x * size - plane.y * size,
@@ -323,6 +324,9 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 center + plane.x * size + plane.y * size,
                 center - plane.x * size + plane.y * size,
             ];
+            for corner in q {
+                bounds.add(corner);
+            }
             let mut fill = c.added;
             fill[3] = 70;
             for p in [q[0], q[1], q[2], q[0], q[2], q[3]] {
@@ -387,7 +391,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    Built { scene: sc, replaced, error: None, bounds: Aabb3::EMPTY, applied: None }
+    Built { scene: sc, replaced, error: None, bounds, applied: None }
 }
 
 /// Is face `f` of `m` new surface, i.e. not on the old mesh? Decided by a vote of points on it

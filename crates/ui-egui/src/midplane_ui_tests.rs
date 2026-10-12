@@ -111,3 +111,58 @@ fn midplane_face_editor_refills_after_source_moves() {
     assert_eq!(h.app.session.doc.find_feature("Mid").unwrap().kind, original);
     assert!((midplane(&h, "Mid").origin.z - 25.0).abs() < 1e-8);
 }
+
+#[test]
+fn midplane_on_moved_component_faces_previews_applies_and_edits() {
+    for author in ["Part", "root"] {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":"Part:1","translate":[100,0,80]})).unwrap();
+        h.app.run("component.activate", json!({"component":author})).unwrap();
+        let bottom = dialogs::face_sel(&h.app.session, Vec3::new(120.0, 15.0, 80.0)).unwrap();
+        let top = dialogs::face_sel(&h.app.session, Vec3::new(120.0, 15.0, 100.0)).unwrap();
+        h.app.session.selection = vec![bottom, top];
+        h.app.start("construct.plane.midplane");
+        let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let before = h.app.session.doc.features.len();
+        let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+        let preview = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
+        assert!(!preview.scene.xray.is_empty(), "{author}: {:?}; {:?}", commands, h.app.session.preview(&commands).unwrap().after.construct);
+        assert_eq!(h.app.session.doc.features.len(), before);
+        h.frames(4);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        let feature = h.app.session.doc.features.last().unwrap().clone();
+        assert!((midplane(&h, &feature.name).origin.z - 90.0).abs() < 1e-8, "author: {author}");
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":feature.name}})).unwrap();
+        assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|i| i.items.len() == 1));
+        h.frames(4);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
+        assert!((midplane(&h, &feature.name).origin.z - 90.0).abs() < 1e-8);
+    }
+}
+
+#[test]
+fn distant_midplane_preview_bounds_cover_every_drawn_corner() {
+    for with_body in [false, true] {
+        let mut h = if with_body { part() } else { Harness::new() };
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":2000,"name":"Far"})).unwrap();
+        let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+        let preview = crate::preview::compute(&h.app.session, &[("construct.plane.midplane".into(), json!({"a":"XY","b":"Far"}))], colors).unwrap();
+        assert!(!preview.bounds.is_empty(), "construction-only previews need depth bounds");
+        assert!(!preview.scene.xray.is_empty());
+        // The GPU triangle layout is position, normal and RGBA (28 bytes).
+        for vertex in preview.scene.xray.as_chunks::<28>().0 {
+            let coord = |i| f32::from_le_bytes(vertex[i..i + 4].try_into().unwrap()) as f64;
+            let p = Vec3::new(coord(0), coord(4), coord(8));
+            assert!(p.x >= preview.bounds.min.x - 1e-4 && p.x <= preview.bounds.max.x + 1e-4);
+            assert!(p.y >= preview.bounds.min.y - 1e-4 && p.y <= preview.bounds.max.y + 1e-4);
+            assert!(p.z >= preview.bounds.min.z - 1e-4 && p.z <= preview.bounds.max.z + 1e-4, "{p:?} outside {:?}", preview.bounds);
+        }
+        assert!(preview.bounds.min.z <= 1000.0 && preview.bounds.max.z >= 1000.0);
+    }
+}
