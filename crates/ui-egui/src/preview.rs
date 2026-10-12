@@ -200,6 +200,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         command == "sketch.redefine"
             || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
+            || command == "construct.plane.midplane"
+            || (command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("construct.plane.midplane"))
     }) {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -304,21 +306,30 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let mut sc = GpuScene::default();
     let mut replaced = Vec::new();
-    for construct in &after.construct {
-        if before.construct.iter().any(|old| old == construct) {
+    // Construction features have no body mesh. Draw new or changed planes explicitly.
+    for item in &after.construct {
+        use solidcraft_engine::doc::construct::ConstructGeom;
+        if before.construct.iter().any(|old| old.feature == item.feature && old.geom == item.geom) {
             continue;
         }
-        if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
-            let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
-            let quad = [o - x - y, o + x - y, o + x + y, o - x + y];
-            let color = [c.added[0], c.added[1], c.added[2], 64];
-            for triangle in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
-                for p in triangle {
-                    sc.xray_tri(p.to_f32(), plane.normal().to_f32(), color);
-                }
+        if let ConstructGeom::Plane(plane) = &item.geom {
+            let bounds = state_bounds(after);
+            let size = if bounds.is_empty() { 20.0 } else { bounds.size().len().max(20.0) * 0.6 };
+            let center = if bounds.is_empty() { plane.origin } else { bounds.center() };
+            let center = center - plane.normal() * (center - plane.origin).dot(plane.normal());
+            let q = [
+                center - plane.x * size - plane.y * size,
+                center + plane.x * size - plane.y * size,
+                center + plane.x * size + plane.y * size,
+                center - plane.x * size + plane.y * size,
+            ];
+            let mut fill = c.added;
+            fill[3] = 70;
+            for p in [q[0], q[1], q[2], q[0], q[2], q[3]] {
+                sc.xray_tri(p.to_f32(), plane.normal().to_f32(), fill);
             }
-            for (a, b) in quad.iter().zip(quad.iter().cycle().skip(1)).take(4) {
-                sc.line(a.to_f32(), b.to_f32(), c.added, 1.3, true);
+            for (a, b) in q.iter().zip(q.iter().cycle().skip(1)).take(4) {
+                sc.line(a.to_f32(), b.to_f32(), c.added, 1.5, false);
             }
         }
     }
