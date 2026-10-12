@@ -232,6 +232,26 @@ fn midplane_distinguishes_instances_of_the_same_face() {
 }
 
 #[test]
+fn midplane_captures_unmoved_component_faces_before_later_placement_changes() {
+    for first in [json!({"face":[20,15,0]}), json!("XY")] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name":"Part"}));
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        assert!(!crate::frames::placed(&s), "this must exercise an identity placement");
+        run(&mut s, "construct.plane.midplane", json!({"a":first,"b":{"face":[20,15,20]},"name":"Mid"}));
+        assert!(on_plane(&plane(&s, "Mid"), Vec3::new(20.0, 15.0, 10.0)));
+        run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[100,0,80]}));
+        let expected_z = if first.is_string() { 50.0 } else { 90.0 };
+        assert!(on_plane(&plane(&s, "Mid"), Vec3::new(120.0, 15.0, expected_z)), "the root-owned plane must follow its selected occurrence");
+        let saved = serde_json::to_string(&s.doc).unwrap();
+        let mut restored = Session { doc: std::sync::Arc::new(serde_json::from_str(&saved).unwrap()), ..Session::default() };
+        restored.refresh();
+        assert!(on_plane(&plane(&restored, "Mid"), Vec3::new(120.0, 15.0, expected_z)));
+    }
+}
+
+#[test]
 fn plane_through_two_edges() {
     let mut s = part();
     run(&mut s, "construct.plane.two_edges", json!({"a": {"edge": [20, 0, 0]}, "b": {"edge": [20, 30, 20]}, "name": "E"}));
