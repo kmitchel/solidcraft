@@ -1256,7 +1256,16 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
 /// A pick for the open dialog's active input (a click, or a Select Other row).
 pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     let Some(mut d) = app.dialog.take() else { return };
+    let active = d.active;
     d.pick(&app.session, sel);
+    if let crate::dialogs::Kind::TwoEdgePlane { sketches, .. } = &mut d.kind
+        && let Some(source) = sketches.get_mut(active)
+    {
+        *source = match hit {
+            Hit::SketchCurve { sketch, .. } => Some(*sketch),
+            _ => None,
+        };
+    }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
         *sketch = match hit {
             Hit::SketchCurve { sketch, .. } => Some(*sketch),

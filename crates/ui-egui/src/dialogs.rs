@@ -101,6 +101,10 @@ pub enum Kind {
     Midplane {
         original: Vec<(Vec<Sel>, Value)>,
     },
+    TwoEdgePlane {
+        original: Vec<(Vec<Sel>, Value)>,
+        sketches: [Option<u64>; 2],
+    },
     /// A construction plane through an axis at an angle to a plane.
     AnglePlane {
         angle: String,
@@ -431,6 +435,10 @@ impl Dialog {
                 Kind::Midplane { original: Vec::new() },
                 vec![SelInput::new("First plane", PLANES | PLANAR_FACES, false), SelInput::new("Second plane", PLANES | PLANAR_FACES, false)],
             ),
+            "construct.plane.two_edges" => Dialog::new(
+                Kind::TwoEdgePlane { original: Vec::new(), sketches: [None; 2] },
+                vec![SelInput::new("First edge", EDGES | AXES, false), SelInput::new("Second edge", EDGES | AXES, false)],
+            ),
             "construct.plane.at_angle" => Dialog::new(
                 Kind::AnglePlane { angle: "45 deg".into() },
                 vec![SelInput::new("Plane", PLANES, false), SelInput::new("Axis", AXES, false)],
@@ -526,6 +534,16 @@ impl Dialog {
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted.
         for sel in &s.selection {
+            if let Kind::TwoEdgePlane { sketches, .. } = &mut d.kind
+                && let Sel::ExternalSketchCurve { sketch, id } = sel
+                && let Some((index, input)) = d.inputs.iter_mut().enumerate().find(|(_, input)| input.items.is_empty())
+            {
+                input.items.push(Sel::SketchCurve { id: id.clone() });
+                if let Some(source) = sketches.get_mut(index) {
+                    *source = Some(*sketch);
+                }
+                continue;
+            }
             let as_body = match sel {
                 Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(Sel::Body { name: body.clone() }),
                 _ => None,
@@ -631,6 +649,7 @@ impl Dialog {
                 | Kind::Draft { .. }
                 | Kind::Mirror
                 | Kind::Midplane { .. }
+                | Kind::TwoEdgePlane { .. }
                 | Kind::Split
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
@@ -726,6 +745,11 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        if let Kind::TwoEdgePlane { sketches, .. } = &mut self.kind
+            && let Some(source) = sketches.get_mut(self.active)
+        {
+            *source = None;
+        }
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -773,6 +797,11 @@ impl Dialog {
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        if let Kind::TwoEdgePlane { sketches, .. } = &mut self.kind
+            && let Some(source) = sketches.get_mut(self.active)
+        {
+            *source = None;
+        }
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -891,6 +920,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::OffsetPlane { .. } => "OFFSET PLANE",
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
         Kind::Midplane { .. } => "MIDPLANE",
+        Kind::TwoEdgePlane { .. } => "PLANE THROUGH TWO EDGES",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
         Kind::Emboss { .. } => "EMBOSS",
@@ -1774,7 +1804,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         enter |= field(ui, t);
                         ui.end_row();
                     }
-                    Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane { .. } => {}
+                    Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane { .. } | Kind::TwoEdgePlane { .. } => {}
                     Kind::Rib { thickness, depth, flip, .. } => {
                         row_label(ui, "Thickness");
                         enter |= field(ui, thickness);
@@ -2762,6 +2792,41 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 "solid.sweep",
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
+        }
+        Kind::TwoEdgePlane { original, sketches } => {
+            let reference = |i: usize| -> Result<Value, String> {
+                if let Some((items, value)) = original.get(i)
+                    && items == sels(d, i)
+                {
+                    return Ok(value.clone());
+                }
+                match sels(d, i).first() {
+                    Some(Sel::Edge { body, index, point }) => {
+                        let state = app.session.world_state();
+                        let body = state.body(body).ok_or("the picked edge is no longer in the model")?;
+                        let name = solidcraft_engine::doc::naming::edge_names(body).get(*index).cloned().ok_or("the picked edge is missing")?;
+                        Ok(json!({"edge":pt(*point),"name":name}))
+                    }
+                    Some(Sel::Axis { name }) => Ok(json!({"axis":name})),
+                    Some(Sel::SketchCurve { id }) => {
+                        let state = app.session.world_state();
+                        let matches: Vec<_> = state
+                            .sketches
+                            .iter()
+                            .filter(|sketch| sketch.sketch.curve_index(id).is_some() || sketch.sketch.wire_index(id).is_some())
+                            .map(|sketch| sketch.feature)
+                            .collect();
+                        let source = match sketches.get(i).copied().flatten() {
+                            Some(source) if matches.contains(&source) => source,
+                            None if matches.len() == 1 => *matches.first().ok_or("pick a sketch line")?,
+                            _ => return Err("pick the line in the viewport to identify its source sketch".into()),
+                        };
+                        Ok(json!({"sketch":source,"curve":id}))
+                    }
+                    _ => Err("pick two straight edges, sketch lines or axes".into()),
+                }
+            };
+            ("construct.plane.two_edges", json!({"a":reference(0)?,"b":reference(1)?}))
         }
         Kind::Midplane { original } => {
             let reference = |i: usize| -> Result<Value, String> {
@@ -3788,6 +3853,28 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
             }
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::TwoEdges { a, b } } => {
+            use solidcraft_engine::doc::construct::GeoRef;
+            let mut d = start("construct.plane.two_edges")?;
+            let mut original = Vec::new();
+            let mut sketches = [None; 2];
+            for (index, (input, reference)) in d.inputs.iter_mut().zip([a.as_ref(), b.as_ref()]).enumerate() {
+                input.items = match reference {
+                    GeoRef::Edge { at, .. } => vec![Sel::Edge { body: String::new(), index: 0, point: *at }],
+                    GeoRef::SketchCurve { sketch, curve } => {
+                        if let Some(source) = sketches.get_mut(index) {
+                            *source = Some(*sketch);
+                        }
+                        vec![Sel::SketchCurve { id: curve.clone() }]
+                    }
+                    GeoRef::World { axis } | GeoRef::Axis { name: axis } => vec![Sel::Axis { name: axis.clone() }],
+                    _ => return None,
+                };
+                original.push((input.items.clone(), serde_json::to_value(reference).ok()?));
+            }
+            d.kind = Kind::TwoEdgePlane { original, sketches };
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {

@@ -48,6 +48,8 @@ mod menu_tests;
 #[cfg(test)]
 mod midplane_ui_tests;
 #[cfg(test)]
+mod two_edge_plane_ui_tests;
+#[cfg(test)]
 mod status_tests {
     #[test]
     fn the_status_bar_names_commands_by_label() {

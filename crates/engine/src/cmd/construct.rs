@@ -97,7 +97,7 @@ fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> 
     } else if let Some(at) = p3("face") {
         GeoRef::Face { at, name: None }
     } else if let Some(at) = p3("edge") {
-        GeoRef::Edge { at, name: None }
+        GeoRef::Edge { at, name: str_(v, "name").map(str::to_string) }
     } else if let Some(at) = p3("vertex") {
         GeoRef::Vertex { at }
     } else if let Some(sk) = v.get("sketch") {
@@ -232,20 +232,7 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
             }
             return Ok(GeoRef::Plane { plane: super::sketch::face::capture(s, &pick, cmd)? });
         }
-        let mut reference = geo(s, value, cmd, key)?;
-        // Tagged references are saved definitions, already in the author's frame.
-        if value.is_some_and(|value| value.get("type").is_none())
-            && let Some(inverse) = solidcraft_doc::mat_inverse(&s.active_component_frame())
-        {
-            reference.map_points(&mut |point| *point = solidcraft_doc::apply_point(&inverse, *point), &mut |plane| {
-                let mut kind = FeatureKind::ConstructionPlane { plane: plane.clone() };
-                kind.transform_geometry(&inverse);
-                if let FeatureKind::ConstructionPlane { plane: mapped } = kind {
-                    *plane = mapped;
-                }
-            });
-        }
-        Ok(reference)
+        geo_in_author(s, value, cmd, key)
     };
     let (a, b) = (reference("a")?, reference("b")?);
     for reference in [&a, &b] {
@@ -260,8 +247,25 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.two_edges";
-    let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
-    plane(s, p, PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) })
+    let (a, b) = (geo_in_author(s, p.get("a"), cmd, "a")?, geo_in_author(s, p.get("b"), cmd, "b")?);
+    add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) } }, false)
+}
+
+/// New picks use world coordinates; tagged saved definitions retain their authoring frame.
+fn geo_in_author(s: &Session, value: Option<&Value>, cmd: &str, key: &str) -> Result<GeoRef> {
+    let mut reference = geo(s, value, cmd, key)?;
+    if value.is_some_and(|value| value.get("type").is_none())
+        && let Some(inverse) = solidcraft_doc::mat_inverse(&s.active_component_frame())
+    {
+        reference.map_points(&mut |point| *point = solidcraft_doc::apply_point(&inverse, *point), &mut |plane| {
+            let mut kind = FeatureKind::ConstructionPlane { plane: plane.clone() };
+            kind.transform_geometry(&inverse);
+            if let FeatureKind::ConstructionPlane { plane: mapped } = kind {
+                *plane = mapped;
+            }
+        });
+    }
+    Ok(reference)
 }
 
 fn plane_points(s: &mut Session, p: &Value) -> Result<Value> {

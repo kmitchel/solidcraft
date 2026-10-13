@@ -290,6 +290,16 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+fn straight_line(ctx: &Ctx, reference: &GeoRef) -> Result<(Vec3, Vec3)> {
+    let resolved = line(ctx, reference)?;
+    if let GeoRef::Edge { at, name } = reference
+        && as_line(&edge_points(ctx.st, *at, name)?).is_none()
+    {
+        return Err(bad("the edge is not straight"));
+    }
+    Ok(resolved)
+}
+
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {
@@ -434,15 +444,7 @@ fn line_line(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> Option<Vec3> {
 pub(crate) fn resolve_axis(ctx: &Ctx, d: &AxisDef) -> Result<(Vec3, Vec3)> {
     match d {
         AxisDef::ThroughFace { face } => line(ctx, face),
-        AxisDef::Edge { edge } => {
-            let (o, dir) = line(ctx, edge)?;
-            if let GeoRef::Edge { at, name } = edge
-                && as_line(&edge_points(ctx.st, *at, name)?).is_none()
-            {
-                return Err(bad("the edge is not straight"));
-            }
-            Ok((o, dir))
-        }
+        AxisDef::Edge { edge } => straight_line(ctx, edge),
         AxisDef::NormalToFace { face, point: p } => {
             let (s, _) = face_surface_at(ctx, face)?;
             let q = point(ctx, p)?;
@@ -505,7 +507,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             Plane::new(o, dir, n.cross(dir)).ok_or_else(degenerate)
         }
         PlaneRef::TwoEdges { a, b } => {
-            let ((o1, d1), (o2, d2)) = (line(ctx, a)?, line(ctx, b)?);
+            let ((o1, d1), (o2, d2)) = (straight_line(ctx, a)?, straight_line(ctx, b)?);
             let n = match d1.cross(d2).normalized() {
                 Some(n) if (o2 - o1).dot(n).abs() <= 1e-6 * (1.0 + (o2 - o1).len()) => n,
                 Some(_) => return Err(bad("the edges are not in one plane")),

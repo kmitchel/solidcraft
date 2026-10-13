@@ -309,6 +309,20 @@ fn plane_through_two_edges() {
 }
 
 #[test]
+fn two_edges_rejects_curved_edges_without_changing_the_document() {
+    let mut s = part();
+    let before = s.doc.clone();
+    for params in [
+        json!({"a":{"edge":[65,0,10]},"b":{"axis":"X"}}),
+        json!({"a":{"edge":[20,0,0]},"b":{"edge":[20,0,0]}}),
+        json!({"a":{"edge":[20,0,0]},"b":{"edge":[40,15,20]}}),
+    ] {
+        assert!(s.execute("construct.plane.two_edges", &params).is_err(), "{params}");
+        assert_eq!(s.doc.features, before.features);
+    }
+}
+
+#[test]
 fn plane_through_three_points() {
     let mut s = part();
     run(

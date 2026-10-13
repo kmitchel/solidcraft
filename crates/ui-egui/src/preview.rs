@@ -202,6 +202,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
             || command == "construct.plane.midplane"
             || (command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("construct.plane.midplane"))
+            || command == "construct.plane.two_edges"
+            || (command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("construct.plane.two_edges"))
     }) {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(&preview.before, &preview.after, colors)))
