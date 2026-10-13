@@ -547,7 +547,7 @@ pub(crate) fn author_path_for_rebind(s: &Session, feature: &solidcraft_doc::Feat
         }
     } else if let FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } = &feature.kind {
         for reference in [a, b] {
-            if let solvecraft_doc::construct::GeoRef::Plane { plane } = reference.as_ref()
+            if let solidcraft_doc::construct::GeoRef::Plane { plane } = reference.as_ref()
                 && let Some(anchor) = face::anchor(plane)
             {
                 if saved.as_ref().is_some_and(|path| *path != anchor.author_path) {

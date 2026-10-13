@@ -70,6 +70,8 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   saved author occurrence before capturing replacement faces, including copied occurrences.
   Live preview depth bounds include plane corners, including distant planes and designs
   without bodies.
+- Sample Plate midplanes retain exact plate and boss face sources through coplanar
+  through cuts. Thickness edits, undo/redo, timeline editing and reopening stay associative.
 
 ## Dimensioning and error reporting
 
