@@ -202,8 +202,8 @@ fn midplane_face_picks_follow_rotated_occurrences() {
     run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","axis":[0,1,0],"angle":"90 deg","translate":[100,0,80]}));
     let component = s.active_component;
     let frame = s.doc.component_transform(component);
-    let bottom = solvecraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 0.0));
-    let top = solvecraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 20.0));
+    let bottom = solidcraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 0.0));
+    let top = solidcraft_doc::apply_point(&frame, Vec3::new(20.0, 15.0, 20.0));
     run(&mut s, "component.activate", json!({"component":"root"}));
     run(&mut s, "construct.plane.midplane", json!({"a":{"face":[bottom.x,bottom.y,bottom.z]},"b":{"face":[top.x,top.y,top.z]},"name":"Mid"}));
     let mid = plane(&s, "Mid");
@@ -253,7 +253,7 @@ fn midplane_captures_unmoved_component_faces_before_later_placement_changes() {
 
 #[test]
 fn midplane_edit_restores_root_and_copied_author_occurrences() {
-    use solvecraft_doc::{FeatureKind, PlaneRef, construct::GeoRef};
+    use solidcraft_doc::{FeatureKind, PlaneRef, construct::GeoRef};
     for root_author in [true, false] {
         for replace_both in [false, true] {
             let mut s = Session::default();
@@ -551,4 +551,32 @@ fn ambiguity_error_names_the_other_origin_alias() {
         let inspected = run(&mut s, "sketch.inspect", json!({}));
         assert_eq!(inspected["plane"]["origin"], json!([0.0, 0.0, 0.0]));
     }
+}
+
+#[test]
+fn sample_plate_midplane_keeps_exact_faces_after_boss_and_bore() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    run(&mut s, "construct.plane.midplane", json!({"a":{"face":[25,15,8]},"b":{"face":[40,35,22]},"name":"Mid"}));
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(25., 15., 15.)));
+    let feature = s.doc.find_feature("Mid").unwrap().clone();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::Midplane { a, b } } = &feature.kind else {
+        panic!("not a midplane");
+    };
+    for reference in [a, b] {
+        assert!(matches!(
+            reference.as_ref(),
+            solidcraft_doc::construct::GeoRef::Plane { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. } }
+        ));
+    }
+    run(&mut s, "parameters.change", json!({"name":"thickness","expression":"12 mm"}));
+    assert!(s.model.results.iter().all(|result| result.error.is_none()));
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(25., 15., 19.)));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|result| result.error.is_none()));
+    assert!(on_plane(&plane(&reopened, "Mid"), Vec3::new(25., 15., 19.)));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(25., 15., 15.)));
+    run(&mut s, "edit.redo", json!({}));
+    assert!(on_plane(&plane(&s, "Mid"), Vec3::new(25., 15., 19.)));
 }

@@ -235,9 +235,9 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
         let mut reference = geo(s, value, cmd, key)?;
         // Tagged references are saved definitions, already in the author's frame.
         if value.is_some_and(|value| value.get("type").is_none())
-            && let Some(inverse) = solvecraft_doc::mat_inverse(&s.active_component_frame())
+            && let Some(inverse) = solidcraft_doc::mat_inverse(&s.active_component_frame())
         {
-            reference.map_points(&mut |point| *point = solvecraft_doc::apply_point(&inverse, *point), &mut |plane| {
+            reference.map_points(&mut |point| *point = solidcraft_doc::apply_point(&inverse, *point), &mut |plane| {
                 let mut kind = FeatureKind::ConstructionPlane { plane: plane.clone() };
                 kind.transform_geometry(&inverse);
                 if let FeatureKind::ConstructionPlane { plane: mapped } = kind {

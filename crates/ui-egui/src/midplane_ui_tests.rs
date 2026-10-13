@@ -1,7 +1,7 @@
 //! Midplane's interactive path uses the same associative command as scripts.
 use crate::{dialogs, scenario::Harness};
 use serde_json::json;
-use solvecraft_engine::{Sel, doc::FeatureKind, geom::Vec3};
+use solidcraft_engine::{Sel, doc::FeatureKind, geom::Vec3};
 
 fn part() -> Harness {
     let mut h = Harness::new();
@@ -10,8 +10,35 @@ fn part() -> Harness {
     h
 }
 
-fn midplane(h: &Harness, name: &str) -> solvecraft_engine::geom::Plane {
-    solvecraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, n, _)| n == name).unwrap().2
+fn midplane(h: &Harness, name: &str) -> solidcraft_engine::geom::Plane {
+    solidcraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, n, _)| n == name).unwrap().2
+}
+
+#[test]
+fn sample_plate_midplane_previews_applies_and_follows_thickness() {
+    let mut h = Harness::new();
+    h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
+    h.frames(3);
+    h.app.session.selection =
+        [Vec3::new(25., 15., 8.), Vec3::new(40., 35., 22.)].into_iter().map(|point| dialogs::face_sel(&h.app.session, point).unwrap()).collect();
+    h.app.start("construct.plane.midplane");
+    let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let preview = h.app.session.preview(&commands).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+    assert!(!crate::preview::build(&preview.before, &preview.after, colors).scene.xray.is_empty());
+    h.frames(4);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let feature = h.app.session.doc.features.last().unwrap().clone();
+    assert!((midplane(&h, &feature.name).origin.z - 15.).abs() < 1e-7);
+    h.app.run("parameters.change", json!({"name":"thickness","expression":"12 mm"})).unwrap();
+    assert!((midplane(&h, &feature.name).origin.z - 19.).abs() < 1e-7);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":feature.name}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.len() == 1));
+    h.frames(4);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
 }
 
 #[test]
@@ -148,7 +175,7 @@ fn midplane_on_moved_component_faces_previews_applies_and_edits() {
 
 #[test]
 fn midplane_edit_in_copied_occurrence_previews_and_captures_replacement_faces() {
-    use solvecraft_engine::doc::{PlaneRef, construct::GeoRef};
+    use solidcraft_engine::doc::{PlaneRef, construct::GeoRef};
     let mut h = Harness::new();
     h.app.run("component.create", json!({"name":"Part"})).unwrap();
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -164,7 +191,7 @@ fn midplane_edit_in_copied_occurrence_previews_and_captures_replacement_faces() 
     h.app.dialog.as_mut().unwrap().inputs.first_mut().unwrap().items = vec![top];
     let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     let preview = h.app.session.preview(&commands).unwrap();
-    let solvecraft_engine::doc::construct::ConstructGeom::Plane(plane) =
+    let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) =
         &preview.after.construct.iter().find(|item| item.name == "Mid").unwrap().geom
     else {
         panic!("not a plane")

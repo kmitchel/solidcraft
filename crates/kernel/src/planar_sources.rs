@@ -215,7 +215,9 @@ impl Body {
                     }
                     for plane in &competing {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar tool comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual)
+                        // Cut reverses the tool's faces. A same-facing tool cap
+                        // cannot replace this target support; only its opposite can.
+                        if (!constructed && same_support(plane, &actual))
                             || same_support(
                                 &Plane::new(plane.origin, plane.x, -plane.y).ok_or_else(|| KernelError::Invalid("invalid opposing plane".into()))?,
                                 &actual,
@@ -317,6 +319,23 @@ impl Body {
 mod tests {
     use super::*;
     use crate::{box_solid, fillet, shell, transform_matrix};
+
+    #[test]
+    fn plate_and_boss_supports_survive_a_coplanar_through_cut() {
+        let base = box_solid(Vec3::ZERO, Vec3::new(40., 30., 8.)).unwrap().with_box_certificate(1).unwrap();
+        let boss = box_solid(Vec3::new(10., 10., 8.), Vec3::new(30., 20., 22.)).unwrap().with_box_certificate(2).unwrap();
+        let joined = crate::boolean(&base, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let tool = box_solid(Vec3::new(15., 12., 0.), Vec3::new(25., 18., 22.)).unwrap();
+        let cut = crate::boolean(&joined, &tool, crate::BoolOp::Cut).unwrap().unwrap();
+        for body in [&joined, &cut] {
+            let sources = body.face_sources().unwrap();
+            for (producer, high, z) in [(1, true, 8.), (1, false, 0.), (2, true, 22.)] {
+                let index = sources.iter().position(|source| matches!(source, Some(FaceSource::Box { producer: Some(id), axis: 2, high: h, .. }) if *id == producer && *h == high)).unwrap();
+                assert!((body.face_plane(index).unwrap().origin.z - z).abs() < 1e-7);
+            }
+        }
+        assert!(!cut.tessellate(0.01).unwrap().contains(Vec3::new(20., 15., 4.)));
+    }
 
     #[test]
     fn rounded_shell_planar_roles_are_exact_distinct_and_transformable() {

@@ -3341,7 +3341,7 @@ fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>) -> Option<Se
 fn construction_face_sel_on(s: &Session, at: Vec3, name: Option<&str>, picked_body: Option<&str>) -> Option<Sel> {
     if let Some(name) = name {
         for body in s.world_state().bodies.iter().filter(|body| picked_body.is_none_or(|picked| picked == body.name)) {
-            if let Some(index) = solvecraft_engine::doc::naming::face_names(body).iter().position(|n| n == name) {
+            if let Some(index) = solidcraft_engine::doc::naming::face_names(body).iter().position(|n| n == name) {
                 let mesh = body.mesh();
                 for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
                     if *face as usize == index
@@ -3795,7 +3795,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
-            use solvecraft_engine::doc::construct::GeoRef;
+            use solidcraft_engine::doc::construct::GeoRef;
             let mut d = start("construct.plane.midplane")?;
             let mut original = Vec::new();
             for (input, reference) in d.inputs.iter_mut().zip([a.as_ref(), b.as_ref()]) {
