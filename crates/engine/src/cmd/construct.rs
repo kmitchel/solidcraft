@@ -11,7 +11,7 @@ use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use super::features::{add_feature, check_expr, plane_param, sketch_id};
+use super::features::{add_feature, add_feature_in, check_expr, plane_param, sketch_id};
 use crate::params::{bad, req_expr, str_, vec3};
 use crate::{Result, Session};
 
@@ -253,7 +253,9 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
             super::sketch::face::capture_positions(s, plane)?;
         }
     }
-    plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b) })
+    // Face capture and explicit reference mapping already use the author's frame,
+    // just as Offset Plane's face attachment does.
+    add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: Box::new(a), b: Box::new(b) } }, false)
 }
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {

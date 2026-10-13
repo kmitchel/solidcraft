@@ -2772,8 +2772,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 match sels(d, i).first() {
                     Some(Sel::Plane { name }) => Ok(json!(name)),
-                    Some(Sel::Face { body, index, point }) if planar_face(&app.session, body, *index).is_some() => {
-                        Ok(json!({"face": pt(*point), "body": body, "index": index}))
+                    Some(face @ Sel::Face { .. }) => {
+                        crate::sketch_attachment_ui::face_plane(app, face).ok_or_else(|| "the picked face is no longer in the model".into())
                     }
                     _ => Err(format!("pick {} plane or planar face", if i == 0 { "the first" } else { "the second" })),
                 }
@@ -3334,11 +3334,7 @@ pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
 }
 
 /// Refill an associative face pick at its current position, after upstream edits.
-fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>) -> Option<Sel> {
-    construction_face_sel_on(s, at, name, None)
-}
-
-fn construction_face_sel_on(s: &Session, at: Vec3, name: Option<&str>, picked_body: Option<&str>) -> Option<Sel> {
+fn construction_face_sel(s: &Session, at: Vec3, name: Option<&str>, picked_body: Option<&str>) -> Option<Sel> {
     if let Some(name) = name {
         for body in s.world_state().bodies.iter().filter(|body| picked_body.is_none_or(|picked| picked == body.name)) {
             if let Some(index) = solidcraft_engine::doc::naming::face_names(body).iter().position(|n| n == name) {
@@ -3804,10 +3800,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         let body = anchor
                             .as_ref()
                             .map(|anchor| s.doc.world_body_name(&s.model.state(), &anchor.target.body, anchor.component, &anchor.path));
-                        construction_face_sel_on(s, *at, name.as_deref(), body.as_deref()).into_iter().collect()
+                        construction_face_sel(s, *at, name.as_deref(), body.as_deref()).into_iter().collect()
                     }
                     GeoRef::Plane { plane } => plane_sel(s, plane).into_iter().collect(),
-                    GeoRef::Face { at, name } => construction_face_sel(s, *at, name.as_deref()).into_iter().collect(),
+                    GeoRef::Face { at, name } => construction_face_sel(s, *at, name.as_deref(), None).into_iter().collect(),
                     _ => Vec::new(),
                 };
                 original.push((input.items.clone(), serde_json::to_value(reference).ok()?));
