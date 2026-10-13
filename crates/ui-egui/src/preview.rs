@@ -204,12 +204,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             || (command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("construct.plane.midplane"))
     }) {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
-        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut built = build(&preview.before, &preview.after, colors);
-            built.bounds = built.bounds.union(&state_bounds(&preview.after));
-            built
-        }))
-        .map_err(|_| "the preview failed".to_string());
+        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(&preview.before, &preview.after, colors)))
+            .map_err(|_| "the preview failed".to_string());
     }
     // Joints and drives move occurrences: shown on the placed model.
     if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
@@ -231,7 +227,6 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         None => {
             let p = real.map_err(|e| e.to_string())?;
             let mut b = guard(&|| build(&p.before, &p.after, colors))?;
-            b.bounds = b.bounds.union(&state_bounds(&p.after));
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
             b.applied = p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64)).find_map(|id| p.after.fitted_range(id));
